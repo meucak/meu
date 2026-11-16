@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "meucak"
+name = "meuget"
 version = "1.0.0"
 description = "Universal zero-dependency GitHub (meucak) package & project manager for Windows 10 and Linux"
 readme = "README.md"

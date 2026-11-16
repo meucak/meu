@@ -19,13 +19,13 @@
 
 ### `pip` ile Evrensel Kurulum (Windows 10 / 11 & Linux)
 ```bash
-# PyPI üzerinden (yayınlandığında):
-pip install meucak
+# PyPI üzerinden doğrudan kur:
+pip install meuget
 
-# Doğrudan GitHub üzerinden (her zaman anında çalışır):
+# Doğrudan GitHub üzerinden:
 pip install git+https://github.com/meucak/meu.git
 ```
-*(Kurulum sonrasında `meu`, `meucak` ve `meuget` komutlarının tamamı aynı aracı çalıştırır.)*
+*(Kurulum sonrasında `meu`, `meuget` ve `meucak` komutlarının tamamı aynı aracı çalıştırır.)*
 
 ### Linux (Betik ile)
 ```bash
