@@ -552,6 +552,50 @@ class TestCLILifecycle(unittest.TestCase):
                 if os.name != "nt":
                     self.assertTrue(has_venv)
 
+    def test_pip_scripts_dir_mirroring_and_auto_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            meu_home = tmp_path / "meu_home"
+            scripts_dir = tmp_path / "py_scripts"
+            scripts_dir.mkdir(parents=True)
+            (scripts_dir / ("meu.exe" if os.name == "nt" else "meu")).write_text("stub", encoding="utf-8")
+
+            env = {
+                "MEU_HOME": str(meu_home),
+                "PATH": f"{scripts_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            }
+
+            def fake_download(spec, dest_dir, **kwargs):
+                dest = Path(dest_dir)
+                dest.mkdir(parents=True, exist_ok=True)
+                (dest / "sortingen.py").write_text("print('ok')\n", encoding="utf-8")
+                return {"method": "git", "version": "abc1234"}
+
+            with mock.patch.dict(os.environ, env, clear=False):
+                with mock.patch("sysconfig.get_path", return_value=str(scripts_dir)):
+                    found = meu._get_pip_scripts_dir(
+                        bin_dir=meu_home / "bin",
+                        internal_bin_dir=meu_home / "bin",
+                        ignore_meu_home=True,
+                    )
+                    self.assertEqual(found, scripts_dir.resolve())
+
+                with (
+                    mock.patch.object(meu, "download_repo", side_effect=fake_download),
+                    mock.patch.object(meu, "_get_pip_scripts_dir", return_value=scripts_dir),
+                    mock.patch.object(meu, "_ensure_user_path", return_value=True) as mock_path_fix,
+                ):
+                    code = meu.main(["install", "sortingen"])
+                    self.assertEqual(code, 0)
+                    mock_path_fix.assert_called()
+
+            mirrored = scripts_dir / ("sortingen.cmd" if os.name == "nt" else "sortingen")
+            self.assertTrue(mirrored.is_file())
+            with mock.patch.dict(os.environ, env, clear=False):
+                code_rm = meu.main(["uninstall", "sortingen"])
+                self.assertEqual(code_rm, 0)
+            self.assertFalse(mirrored.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

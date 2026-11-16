@@ -17,7 +17,17 @@
 
 ## `meu` Kurulumu
 
-### Linux
+### `pip` ile Evrensel Kurulum (Windows 10 / 11 & Linux)
+```bash
+# PyPI üzerinden (yayınlandığında):
+pip install meucak
+
+# Doğrudan GitHub üzerinden (her zaman anında çalışır):
+pip install git+https://github.com/meucak/meu.git
+```
+*(Kurulum sonrasında `meu`, `meucak` ve `meuget` komutlarının tamamı aynı aracı çalıştırır.)*
+
+### Linux (Betik ile)
 ```bash
 git clone https://github.com/meucak/meu.git && cd meu && ./install.sh
 ```

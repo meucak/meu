@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=77.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meucak"
+version = "1.0.0"
+description = "Universal zero-dependency GitHub (meucak) package & project manager for Windows 10 and Linux"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    {name = "meucak"},
+]
+keywords = ["cli", "package-manager", "github", "installer", "windows", "linux", "meucak", "meu"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: System :: Installation/Setup",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/meucak/meu"
+Repository = "https://github.com/meucak/meu"
+
+[project.scripts]
+meu = "meu:main"
+meucak = "meu:main"
+meuget = "meu:main"
+
+[tool.setuptools]
+py-modules = ["meu"]

@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import urllib.error
 import urllib.request
@@ -1584,6 +1585,47 @@ def _ensure_user_path(bin_dir: Path) -> bool:
     return updated_any
 
 
+def _get_pip_scripts_dir(
+    bin_dir: Path,
+    internal_bin_dir: Path,
+    *,
+    ignore_meu_home: bool = False,
+) -> Path | None:
+    """Return writable Python Scripts/bin dir on PATH if pip installed meu there."""
+    if os.environ.get("MEU_HOME") and not ignore_meu_home:
+        return None
+
+    excluded = {bin_dir.resolve(), internal_bin_dir.resolve()}
+    candidates: list[Path] = []
+    for scheme in (None, "nt_user" if os.name == "nt" else "posix_user"):
+        try:
+            raw = sysconfig.get_path("scripts") if scheme is None else sysconfig.get_path("scripts", scheme=scheme)
+        except Exception:
+            raw = None
+        if raw:
+            candidates.append(Path(raw))
+
+    if sys.argv and sys.argv[0]:
+        try:
+            argv_dir = Path(sys.argv[0]).resolve().parent
+            candidates.append(argv_dir)
+        except OSError:
+            pass
+
+    for cand in candidates:
+        try:
+            resolved = cand.resolve()
+        except OSError:
+            continue
+        if resolved in excluded or not resolved.is_dir():
+            continue
+        if not _path_contains_dir(resolved) or not os.access(resolved, os.W_OK):
+            continue
+        if any((resolved / name).exists() for name in ("meu.exe", "meu.cmd", "meu", "meucak.exe", "meucak")):
+            return resolved
+    return None
+
+
 def _install_single(
     raw_target: str,
     *,
@@ -1643,7 +1685,9 @@ def _install_single(
                 except OSError:
                     pass
 
+    pip_scripts_dir = _get_pip_scripts_dir(paths["bin_dir"], paths["internal_bin_dir"])
     all_shims: list[Path] = []
+    seen_shims: set[Path] = set()
     for cmd_spec in plan["commands"]:
         shims = create_command_shims(
             paths["bin_dir"],
@@ -1652,7 +1696,20 @@ def _install_single(
             cmd_spec,
             python_exe,
         )
-        all_shims.extend(shims)
+        if pip_scripts_dir is not None:
+            shims.extend(
+                create_command_shims(
+                    pip_scripts_dir,
+                    pip_scripts_dir,
+                    app_dir,
+                    cmd_spec,
+                    python_exe,
+                )
+            )
+        for s in shims:
+            if s not in seen_shims:
+                seen_shims.add(s)
+                all_shims.append(s)
 
     desktop_files: list[Path] = []
     if not no_desktop:
@@ -1700,8 +1757,11 @@ def _install_single(
     if missing_apt:
         _warn(f"Önerilen sistem paketleri eksik olabilir: sudo apt install -y {' '.join(missing_apt)}")
 
-    if not os.environ.get("MEU_HOME") and not _path_contains_dir(paths["bin_dir"]):
-        _warn(f"'{paths['bin_dir']}' PATH içinde görünmüyor. Eklemek için: meu doctor --fix")
+    if not _path_contains_dir(paths["bin_dir"]):
+        if _ensure_user_path(paths["bin_dir"]):
+            _info(f"PATH otomatik güncellendi ({paths['bin_dir']}).")
+        elif not os.environ.get("MEU_HOME"):
+            _warn(f"'{paths['bin_dir']}' PATH içinde görünmüyor. Eklemek için: meu doctor --fix")
 
     return 0
 
