@@ -12,6 +12,7 @@
   - `borfek`, `tessera`, `fil`, `fleet-deck`, `kush` gibi Docker / web servisleri için başlatıcı kısayolları ve isteğe bağlı `--docker` ile ayağa kaldırma sunar.
   - Kataloğa sonradan eklenecek yeni `meucak` repolarını sezgisel olarak otomatik algılar (`meu.json` varsa önceliklendirir).
 - **Git Olmadan da Çalışır:** Sistemde `git` kuruluysa `git clone --depth 1` kullanır; `git` yoksa otomatik olarak GitHub ZIP arşivi indirip çıkarır.
+- **Tek Komutla SSH Sunucusu (`meu ssh`):** `meu install ssh` ve `meu ssh` ile bilgisayarı anında SSH + SFTP + SCP sunucusuna dönüştürür; LAN/Tailscale IP adreslerini ve kopyala-yapıştır bağlantı komutlarını ekrana yazdırır.
 
 ---
 
@@ -70,6 +71,13 @@ meu install borfek --docker
 
 # Kurulu değilse otomatik kurup hemen çalıştır
 meu run sortingen --help
+
+# Bilgisayarı anında SSH + SFTP sunucusu olarak başlat ve IP'leri gör
+meu install ssh
+meu ssh
+meu ssh --daemon     # Arka planda çalıştır
+meu ssh --status     # Bağlantı bilgilerini ve IP'leri yazdır
+meu ssh --stop       # Arka plan sunucusunu durdur
 
 # Mevcut meucak projelerini listele / ara
 meu search

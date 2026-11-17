@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 DEFAULT_OWNER = "meucak"
 
@@ -170,6 +170,16 @@ MEUCAK_CATALOG: dict[str, dict[str, Any]] = {
         "port": None,
         "apt_hints": [],
         "platforms": ["windows", "linux"],
+    },
+    "ssh": {
+        "name": "ssh",
+        "aliases": ["meu-ssh", "sshd", "ssh-server"],
+        "kind": "python-cli",
+        "description": "Tek komutla (meu ssh) bilgisayarı SSH ve SFTP sunucusuna dönüştüren, IP ve bağlantı bilgilerini ekrana yazdıran çapraz platform SSH sunucusu.",
+        "entrypoints": [{"name": "meu-ssh", "target_type": "python_script", "script": "meu_ssh.py"}],
+        "port": 2222,
+        "apt_hints": [],
+        "platforms": ["linux", "windows"],
     },
 }
 
@@ -1302,10 +1312,10 @@ def _parse_requirement_modules(req_file: Path) -> list[str]:
     }
     for line in req_file.read_text(encoding="utf-8", errors="ignore").splitlines():
         clean = line.split("#", 1)[0].strip()
-        if not clean or clean.startswith("-"):
+        if not clean or clean.startswith(("-", ".", "/", "\\")) or "://" in clean:
             continue
         pkg = re.split(r"[<>=!~;\[]", clean, maxsplit=1)[0].strip()
-        if pkg:
+        if pkg and "/" not in pkg and "\\" not in pkg:
             modules.append(pkg_to_import.get(pkg.lower(), pkg.replace("-", "_")))
     return modules
 
@@ -1419,6 +1429,7 @@ def _setup_python_env(app_dir: Path, plan: dict[str, Any], no_deps: bool) -> tup
                 _info(f"Bağımlılıklar uv ile kuruluyor: {req_file.name}")
                 uv_proc = subprocess.run(
                     [uv_bin, "pip", "install", "--python", str(venv_python), "-q", "-r", str(req_file)],
+                    cwd=str(app_dir),
                     capture_output=True,
                     text=True,
                     timeout=300,
@@ -1436,6 +1447,7 @@ def _setup_python_env(app_dir: Path, plan: dict[str, Any], no_deps: bool) -> tup
         _info(f"Bağımlılıklar kuruluyor: {req_file.name}")
         proc = subprocess.run(
             [str(venv_python), "-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", str(req_file)],
+            cwd=str(app_dir),
             capture_output=True,
             text=True,
             timeout=300,
@@ -1660,12 +1672,31 @@ def _install_single(
         return 0
 
     _info(f"{spec.owner}/{spec.repo} indiriliyor ({spec.html_url})...")
-    dl_meta = download_repo(
-        spec,
-        app_dir,
-        prefer_git=prefer_git,
-        cache_dir=paths["cache_dir"],
-    )
+    bundled_ssh = Path(__file__).resolve().parent / "meu_ssh.py"
+    if spec.owner.lower() == DEFAULT_OWNER.lower() and spec.repo == "ssh":
+        try:
+            dl_meta = download_repo(
+                spec,
+                app_dir,
+                prefer_git=prefer_git,
+                cache_dir=paths["cache_dir"],
+            )
+        except Exception as exc:
+            if bundled_ssh.is_file():
+                _warn(f"GitHub indirilemedi ({exc}); yerleşik meu-ssh modülü kullanılıyor...")
+                app_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(bundled_ssh, app_dir / "meu_ssh.py")
+                (app_dir / "requirements.txt").write_text("asyncssh>=2.14.0\n", encoding="utf-8")
+                dl_meta = {"method": "builtin", "version": __version__}
+            else:
+                raise
+    else:
+        dl_meta = download_repo(
+            spec,
+            app_dir,
+            prefer_git=prefer_git,
+            cache_dir=paths["cache_dir"],
+        )
     _ok(f"İndirildi ({dl_meta['method']} • {dl_meta['version']}) -> {app_dir}")
 
     compat_notes = apply_compat_patches(app_dir, spec.repo)
@@ -1752,6 +1783,15 @@ def _install_single(
         _info(f"Terminal komutu: {', '.join(cmd_names)}")
     if desktop_files:
         _info(f"Masaüstü kısayolu: {', '.join(str(p) for p in desktop_files)}")
+
+    if spec.owner.lower() == DEFAULT_OWNER.lower() and spec.repo == "ssh":
+        ssh_script = app_dir / "meu_ssh.py"
+        if ssh_script.is_file():
+            try:
+                subprocess.run([str(python_exe), str(ssh_script), "--install-setup"], check=False)
+            except Exception as exc:
+                _warn(f"SSH anahtar ön kurulumu tamamlanamadı: {exc}")
+        _ok("SSH sunucusunu başlatmak için terminale 'meu ssh' yazın.")
 
     missing_apt = _check_missing_apt_packages(plan.get("apt_hints", []))
     if missing_apt:
@@ -2095,6 +2135,55 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ssh(args: argparse.Namespace) -> int:
+    paths = get_meu_paths()
+    registry = Registry(paths["registry_file"])
+    rec = registry.get_app("ssh")
+    app_dir = Path(rec["app_dir"]) if rec and rec.get("app_dir") else (paths["apps_dir"] / "ssh")
+    script_path = app_dir / "meu_ssh.py"
+    python_exe = Path(rec["python_exe"]) if rec and rec.get("python_exe") else Path(sys.executable)
+
+    if rec is None or not script_path.is_file() or not python_exe.exists():
+        _info("SSH sunucu modülü henüz kurulu değil; önce 'meu install ssh' çalıştırılıyor...")
+        rc = _install_single("ssh", force=True)
+        if rc != 0:
+            return rc
+        rec = registry.get_app("ssh")
+        if rec is None:
+            _err("ssh kurulumu doğrulanamadı.")
+            return 1
+        app_dir = Path(rec["app_dir"])
+        script_path = app_dir / "meu_ssh.py"
+        python_exe = Path(rec["python_exe"])
+
+    forwarded: list[str] = []
+    if args.port is not None:
+        forwarded.extend(["--port", str(args.port)])
+    if args.password is not None:
+        forwarded.extend(["--password", args.password])
+    if args.status:
+        forwarded.append("--status")
+    if args.install_setup:
+        forwarded.append("--install-setup")
+    if args.install_system:
+        forwarded.append("--install-system")
+    if args.daemon:
+        forwarded.append("--daemon")
+    if args.stop:
+        forwarded.append("--stop")
+    if args.quiet:
+        forwarded.append("--quiet")
+
+    proc = subprocess.Popen([str(python_exe), str(script_path), *forwarded])
+    try:
+        return int(proc.wait())
+    except KeyboardInterrupt:
+        try:
+            return int(proc.wait(timeout=3))
+        except Exception:
+            return 0
+
+
 def cmd_self_install(args: argparse.Namespace) -> int:
     paths = get_meu_paths()
     for key in ("home", "core_dir", "apps_dir", "cache_dir", "bin_dir", "internal_bin_dir"):
@@ -2106,6 +2195,13 @@ def cmd_self_install(args: argparse.Namespace) -> int:
         shutil.copy2(src_self, dst_self)
         if os.name != "nt":
             os.chmod(dst_self, 0o755)
+
+    src_ssh = src_self.parent / "meu_ssh.py"
+    dst_ssh = paths["core_dir"] / "meu_ssh.py"
+    if src_ssh.is_file() and src_ssh.resolve() != dst_ssh.resolve():
+        shutil.copy2(src_ssh, dst_ssh)
+        if os.name != "nt":
+            os.chmod(dst_ssh, 0o755)
 
     cmd_spec = {"name": "meu", "target_type": "python_script", "script": "meu.py", "gui": False}
     shims = create_command_shims(
@@ -2216,6 +2312,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="meu aracının kendisini sisteme ve PATH'e kur",
     )
     p_self.set_defaults(func=cmd_self_install)
+
+    p_ssh = sub.add_parser(
+        "ssh",
+        aliases=["sshd", "ssh-server"],
+        help="Bu bilgisayarı SSH + SFTP sunucusuna dönüştür ve bağlantı IP'lerini göster",
+    )
+    p_ssh.add_argument("-p", "--port", type=int, default=None, help="Dinlenecek SSH portu (varsayılan: 2222)")
+    p_ssh.add_argument("--password", default=None, help="SSH giriş şifresi (varsayılan: meu)")
+    p_ssh.add_argument("--status", "--check", action="store_true", help="IP ve SSH bağlantı bilgilerini gösterip çık")
+    p_ssh.add_argument("--install-setup", action="store_true", help="Filo SSH anahtarlarını ve host anahtarını hazırla")
+    p_ssh.add_argument("--install-system", action="store_true", help="Sistem OpenSSH servisini kurmayı/başlatmayı dene")
+    p_ssh.add_argument("-d", "--daemon", action="store_true", help="SSH sunucusunu arka planda başlat")
+    p_ssh.add_argument("--stop", action="store_true", help="Arka planda çalışan MEU SSH sunucusunu durdur")
+    p_ssh.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
+    p_ssh.set_defaults(func=cmd_ssh)
 
     return parser
 

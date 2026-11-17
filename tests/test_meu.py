@@ -19,6 +19,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import meu  # noqa: E402
+import meu_ssh  # noqa: E402
 
 
 class TestTargetResolutionAndCatalog(unittest.TestCase):
@@ -115,6 +116,7 @@ class TestTargetResolutionAndCatalog(unittest.TestCase):
             "pdf-studio",
             "antigravity-mobile-app",
             "MouseWithBorders-Android",
+            "ssh",
         }
         self.assertTrue(expected.issubset(set(meu.MEUCAK_CATALOG.keys())))
 
@@ -595,6 +597,84 @@ class TestCLILifecycle(unittest.TestCase):
                 code_rm = meu.main(["uninstall", "sortingen"])
                 self.assertEqual(code_rm, 0)
             self.assertFalse(mirrored.exists())
+
+
+class TestMeuSSH(unittest.TestCase):
+    def test_ssh_target_and_aliases(self):
+        for raw in ("ssh", "sshd", "meu-ssh", "ssh-server"):
+            with self.subTest(raw=raw):
+                spec = meu.resolve_target(raw)
+                self.assertEqual(spec.owner, "meucak")
+                self.assertEqual(spec.repo, "ssh")
+                self.assertTrue(spec.is_known_meucak)
+
+    def test_parse_requirement_modules_skips_local_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            req = Path(tmp) / "requirements.txt"
+            req.write_text("asyncssh>=2.14.0\n./meu_ssh_bootstrap\n-e .\n", encoding="utf-8")
+            mods = meu._parse_requirement_modules(req)
+            self.assertEqual(mods, ["asyncssh"])
+
+    def test_setup_ssh_keys_idempotent_in_isolated_meu_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"MEU_HOME": tmp}, clear=False):
+                with mock.patch("shutil.which", return_value=None):
+                    info1 = meu_ssh.setup_ssh_keys()
+                    info2 = meu_ssh.setup_ssh_keys()
+
+                user_ak = Path(info1["user_authorized_keys"])
+                meu_ak = Path(info1["meu_authorized_keys"])
+                self.assertTrue(user_ak.is_file())
+                self.assertTrue(meu_ak.is_file())
+                self.assertEqual(info1["total_authorized_keys"], len(meu_ssh.FLEET_AUTHORIZED_KEYS))
+                self.assertEqual(info2["added_user_keys"], 0)
+                self.assertEqual(info2["added_meu_keys"], 0)
+                self.assertIn("kasa@kasa", user_ak.read_text(encoding="utf-8"))
+
+    def test_network_info_and_banner_formatting(self):
+        net_info = {
+            "hostname": "test-pc",
+            "username": "alice",
+            "os": "Linux (x86_64)",
+            "primary_ip": "192.168.1.42",
+            "lan_ips": ["192.168.1.42"],
+            "tailscale_ips": ["100.81.100.85"],
+        }
+        banner = meu_ssh.format_connection_banner(
+            net_info,
+            meu_port=2222,
+            password="meu",
+            sys_sshd={"port22_active": True},
+            key_info={"total_authorized_keys": 8},
+        )
+        self.assertIn("192.168.1.42", banner)
+        self.assertIn("100.81.100.85", banner)
+        self.assertIn("ssh -p 2222 alice@192.168.1.42", banner)
+        self.assertIn("ssh -p 2222 alice@100.81.100.85", banner)
+        self.assertIn("ssh alice@192.168.1.42", banner)
+
+    def test_meu_install_ssh_fallback_and_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            meu_home = Path(tmp) / "meu_home"
+            env = {"MEU_HOME": str(meu_home), "NO_COLOR": "1"}
+            with mock.patch.dict(os.environ, env, clear=False):
+                with mock.patch.object(meu, "download_repo", side_effect=RuntimeError("offline")):
+                    out = io.StringIO()
+                    err = io.StringIO()
+                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                        rc = meu.main(["install", "ssh", "--no-deps"])
+                    self.assertEqual(rc, 0, msg=err.getvalue())
+                    self.assertIn("meu ssh", out.getvalue())
+
+                self.assertTrue((meu_home / "apps" / "ssh" / "meu_ssh.py").is_file())
+                self.assertTrue((meu_home / "user_ssh" / "authorized_keys").is_file())
+
+                out_st = io.StringIO()
+                with contextlib.redirect_stdout(out_st):
+                    rc_st_inproc = meu_ssh.main(["--status"])
+                self.assertEqual(rc_st_inproc, 0)
+                self.assertIn("MEU SSH", out_st.getvalue())
+                self.assertEqual(meu.main(["ssh", "--status"]), 0)
 
 
 if __name__ == "__main__":

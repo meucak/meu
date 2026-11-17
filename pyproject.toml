@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "meuget"
-version = "1.0.0"
+version = "1.1.0"
 description = "Universal zero-dependency GitHub (meucak) package & project manager for Windows 10 and Linux"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -44,4 +44,4 @@ meucak = "meu:main"
 meuget = "meu:main"
 
 [tool.setuptools]
-py-modules = ["meu"]
+py-modules = ["meu", "meu_ssh"]
